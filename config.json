@@ -1,0 +1,9 @@
+{
+  "operators": [
+    "airtel",
+    "jio",
+    "vodafone",
+    "idea"
+  ],
+  "trackable_threshold": 5
+}
