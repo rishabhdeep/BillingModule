@@ -17,22 +17,42 @@ def get_database():
 def get_trips(user, client, startTime, endTime):
     database = get_database()
     collection = database['trips']
+    start = datetime.datetime(startTime[2], startTime[1], startTime[0])
+    end = datetime.datetime(endTime[2], endTime[1], endTime[0])
+    query = {
+        'user': user, '$and': [{
+            '$or': [{
+                'startTime': {
+                    '$gte': start
+                }
+            }, {
+                'startTime': {
+                    '$gte': start.isoformat()
+                }
+            }]
+        }, {
+            '$or': [{
+                'startTime': {
+                    '$lte': end
+                }
+            }, {
+                'startTime': {
+                    '$lte': end.isoformat()
+                }
+            }]
+        }]}
     if client == '' or client is None:
-        data = collection.find({
-            'user': user,
-            'startTime': {
-                '$gte': datetime.datetime(startTime[2], startTime[1], startTime[0]),
-                '$lte': datetime.datetime(endTime[2], endTime[1], endTime[0])
-            }
-        })
+        data = collection.find(query)
         return list(x for x in data)
     else:
-        data = collection.find({
-            'user': user,
-            'client_client': client,
-            'startTime': {
-                '$gte': datetime.datetime(startTime[2], startTime[1], startTime[0]),
-                '$lte': datetime.datetime(endTime[2], endTime[1], endTime[0])
-            }
-        })
-        return data
+        query['client_client'] = client
+        data = collection.find(query)
+        if isinstance(data, list):
+            return data
+        else:
+            data = list(d for d in data)
+            if isinstance(data, list):
+                return data
+            else:
+                data = list(d for d in data)
+                return data

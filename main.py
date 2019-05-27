@@ -1,4 +1,5 @@
 from helper import get_database, get_trips, date_range
+import dateutil.parser
 import datetime
 import xlsxwriter
 import sys
@@ -22,36 +23,48 @@ def get_pings(trips_list):
     return list(x for x in data)
 
 
+def get_index(x):
+    cnt = 0
+    for key, val in headings_dict.items():
+        if x == key:
+            return cnt
+        cnt += 1
+    return cnt
+
+
 def add_new_sheet(data, name):
     name = name.replace('\\', ' ')
     name = name.replace('/', ' ')
-    headings = ['ID', 'Truck Number', 'Invoice', 'Source', 'Destination', 'Start Time', 'End Time', 'No Of Pings',
-                'Telephone', 'Operator', 'Tracked']
-    if has_client_client:
-        headings.insert(1, 'Client')
-    if billing_type:
-        headings.append('Trip Days')
-
     worksheet = workbook.add_worksheet(name)
-    for i in range(len(headings)):
-        worksheet.write(0, i, headings[i], HEADING_FORMAT)
-        worksheet.set_column(i, i, len(headings[i]) + 7)
+
+    row, column = 0, 0
+    for heading_key, heading_val in headings_dict.items():
+        row = 0
+        worksheet.write(row, column, heading_val, HEADING_FORMAT)
+        worksheet.set_column(column, column, len(heading_val) + 7)
+        row = 1
+        for result in data:
+            worksheet.write(row, column, str(result[str(heading_key)]))
+            row += 1
+        column += 1
+
     worksheet.set_column(0, 0, 25)
+
     n = len(data)
-    for i in range(n):
-        length = len(data[i]) if billing_type else len(data[i]) - 1
-        for j in range(length):
-            worksheet.write(i + 1, j, data[i][j])
-            worksheet.write(n + 1, j, '', TOTAL_FORMAT)
+    for i in range(len(headings_dict.items())):
+        worksheet.write(n + 1, i, '', TOTAL_FORMAT)
     worksheet.write(n + 1, 0, "TOTAL ", TOTAL_FORMAT)
-    worksheet.write(n + 1, PING_INDEX, sum(x[PING_INDEX] for x in data), TOTAL_FORMAT)
-    worksheet.write(n + 1, TRACKED_INDEX, sum(1 for i in data if i[TRACKED_INDEX] == 1), TOTAL_FORMAT)
+    if 'pings' in headings_dict:
+        worksheet.write_number(n + 1, get_index('pings'), sum(x['pings'] for x in data), TOTAL_FORMAT)
+    if 'trackable' in headings_dict:
+        worksheet.write_number(n + 1, get_index('trackable'), sum(1 for i in data if i['trackable'] == 'Y'),
+                               TOTAL_FORMAT)
     if billing_type:
-        worksheet.write(n + 1, TRIP_DAYS, sum(i[TRIP_DAYS] for i in data), TOTAL_FORMAT)
+        worksheet.write_number(n + 1, get_index('trip_days'), sum(i['trip_days'] for i in data), TOTAL_FORMAT)
 
 
 def operators_summary(ws, result):
-    global SOURCE_INDEX, DEST_INDEX, PING_INDEX, OPER_INDEX, TRACKED_INDEX, TRIP_DAYS, has_client_client
+    global has_client_client
     headings2 = ['Operators', 'Total Tracked Trips', 'Tracked Trips', 'Traced Percentage']
     for i in range(len(headings2)):
         ws.write(2, i + 8, headings2[i], HEADING_FORMAT)
@@ -61,13 +74,13 @@ def operators_summary(ws, result):
     for opr in operators:
         temp = list()
         for trip in result:
-            if trip[OPER_INDEX] == opr:
-                temp.append(trip[PING_INDEX])
+            if trip['operator'] == opr:
+                temp.append(trip['pings'])
         operators_data.append(temp)
     temp = list()
     for trip in result:
-        if trip[OPER_INDEX] not in trackable_operators:
-            temp.append(trip[PING_INDEX])
+        if trip['operator'] not in trackable_operators:
+            temp.append(trip['pings'])
     operators_data.append(temp)
     operators.append('Other Operator')
     total_operators = len(operators_data)
@@ -88,12 +101,12 @@ def operators_summary(ws, result):
     ws.write(total_operators + 3, 10, total_tracked, TOTAL_FORMAT)
     try:
         ws.write(total_operators + 3, 11, '{} %'.format(round(total_tracked / total_trips * 100, 2)), TOTAL_FORMAT)
-    except ZeroDivisionError:
-        print("Total Tracked Trips is Empty")
+    except ZeroDivisionError as e:
+        print("Total Tracked Trips is Empty " + str(e))
 
 
 def create_summary(result):
-    global SOURCE_INDEX, DEST_INDEX, PING_INDEX, OPER_INDEX, TRACKED_INDEX, TRIP_DAYS, has_client_client
+    global has_client_client
     ws = workbook.add_worksheet('Summary')
     operators_summary(ws, result)
     headings = ['Source Name', 'Total Trips', 'Trackable Operators', 'Other Operators', 'Total Tracked', 'Trackable %',
@@ -101,19 +114,19 @@ def create_summary(result):
     if has_client_client:
         headings[0] = 'Client Name'
 
-    header = sorted(set(opr[CLIENT_CLIENT_INDEX] for opr in result)) if has_client_client else sorted(
-        set(opr[SOURCE_INDEX] for opr in result))
+    header = sorted(set(opr['client_client'] for opr in result)) if has_client_client else sorted(
+        set(opr['source'] for opr in result))
     ws.write(3 + len(header), 0, 'TOTAL', TOTAL_FORMAT)
     total = [0] * 6
     for i in range(len(header)):
         ws.write(3 + i, 0, header[i])
         total_trips = list(
-            trip for trip in result if trip[CLIENT_CLIENT_INDEX] == header[i]) if has_client_client else list(
-            trip for trip in result if trip[SOURCE_INDEX] == header[i])
+            trip for trip in result if trip['client_client'] == header[i]) if has_client_client else list(
+            trip for trip in result if trip['source'] == header[i])
         total[0] += len(total_trips)
         ws.write(3 + i, 1, len(total_trips))
-        trackable = sum(1 for trip in total_trips if trip[OPER_INDEX] in trackable_operators)
-        total_tracked = sum(1 for trip in total_trips if trip[PING_INDEX] > 0)
+        trackable = sum(1 for trip in total_trips if trip['operator'] in trackable_operators)
+        total_tracked = sum(1 for trip in total_trips if trip['pings'] > 0)
         total[1] += trackable
         total[3] += total_tracked
         total[2] += len(total_trips) - trackable
@@ -122,12 +135,12 @@ def create_summary(result):
         ws.write(3 + i, 4, total_tracked)
         try:
             ws.write(3 + i, 5, "{} %".format(round(trackable / len(total_trips) * 100, 2)))
-        except ZeroDivisionError:
-            print("Total Trips are Zero")
+        except ZeroDivisionError as e:
+            print("Total Trips are Zero " + str(e))
         try:
             ws.write(3 + i, 6, "{} %".format(round(total_tracked / trackable * 100, 2)))
-        except ZeroDivisionError:
-            print("Total Trackable trips are Zero")
+        except ZeroDivisionError as e:
+            print("Total Trackable trips are Zero " + str(e))
 
     for i in range(len(headings)):
         ws.set_column(i, i, 15)
@@ -135,29 +148,30 @@ def create_summary(result):
     try:
         total[4] = '{} %'.format(round(total[1] / total[0] * 100, 2))
         total[5] = '{} %'.format(round(total[3] / total[1] * 100, 2))
-    except ZeroDivisionError:
-        print("Division by Zero in calculating Total")
+    except ZeroDivisionError as e:
+        print("Division by Zero in calculating Total. " + str(e))
 
     for i in range(len(total)):
         ws.write(3 + len(header), 1 + i, total[i], TOTAL_FORMAT)
 
     trackable_operators_data = list()
     for oper in trackable_operators:
-        cnt = sum(1 for values in result if values[OPER_INDEX] == oper)
+        cnt = sum(1 for values in result if values['operator'] == oper)
         trackable_operators_data.append({oper: cnt})
     ws.set_column(0, 13, 14)
 
 
 def main():
-    global SOURCE_INDEX, DEST_INDEX, PING_INDEX, OPER_INDEX, TRACKED_INDEX, TRIP_DAYS, has_client_client
+    global has_client_client
     cnt = 0
     result = list()
     print("Process Starting ..........")
     gmt_to_ist = datetime.timedelta(hours=5, minutes=30)
     temp_trip = list(trip['_id'] for trip in get_trips(username, client, start_time, end_time))
     n = len(temp_trip)
-    trips_pings_data = get_pings(temp_trip)
+    all_trips_pings = get_pings(temp_trip)
     trips = get_trips(username, client, start_time, end_time)
+    # print(list(tt for tt in trips))
     try:
         has_client_client = 'client_client' in trips[0].keys()
     except ValueError:
@@ -169,11 +183,12 @@ def main():
     for trip in trips:
         client_client = ''
         if has_client_client:
-            client_client = trip['client_client']
+            client_client = trip['client_client'] if 'client_client' in trip else "NULL"
         trip_keys = trip.keys()
         running = trip['running']
         start = trip['startTime']
-        start = start + gmt_to_ist
+        if isinstance(start, str):
+            start = dateutil.parser.parse(start) + gmt_to_ist
         truck_number = ''
         invoice = ''
         if 'truck_number' in trip_keys:
@@ -212,55 +227,48 @@ def main():
             operator = ''
         no_of_pings = 0
         trip_days = 0
-        for trip_pings in trips_pings_data:
-            if trip_id == trip_pings['_id']:
-                no_of_pings += len(trip_pings['pings'])
-                if len(trip_pings) > 0:
-                    for date in date_range(start, end):
-                        if isinstance(trip_pings, dict):
-                            for trip_data in trip_pings['pings']:
-                                trip_pings = trip_data['createdAt']
-                                if date < trip_pings < date + datetime.timedelta(1):
-                                    trip_days += 1
-                        else:
-                            if date < trip_pings < date + datetime.timedelta(1):
-                                trip_days += 1
-        result.append([
-            str(trip_id),
-            truck_number,
-            invoice,
-            source,
-            destination,
-            start.strftime("%d/%m/%Y %H:%M"),
-            end.strftime("%d/%m/%Y %H:%M"),
-            no_of_pings,
-            tel,
-            operator,
-            bool(no_of_pings > trackable_threshold),
-            trip_days
-        ])
+        startTime = datetime.datetime(start.year, start.month, start.day, start.hour, start.month, start.day)
+        endTime = datetime.datetime(end.year, end.month, end.day, end.hour, end.month, end.day)
+        while startTime < endTime:
+            nextTime = startTime + datetime.timedelta(1)
+            ok = False
+            for trip_pings in all_trips_pings:
+                if trip_id == trip_pings['_id']:
+                    no_of_pings += len(trip_pings['pings'])
+                    for trip_ping in trip_pings['pings']:
+                        ping = trip_ping['createdAt'] + gmt_to_ist
+                        if startTime < ping < min(nextTime, endTime):
+                            ok = True
+            if ok:
+                trip_days += 1
+            startTime = nextTime
+        result.append({
+            '_id': trip['_id'],
+            'trip_id': str(trip_id),
+            'truck_number': truck_number,
+            'invoice': invoice,
+            'source': source,
+            'destination': destination,
+            'start_time': start.strftime("%d/%m/%Y %H:%M"),
+            'end_time': end.strftime("%d/%m/%Y %H:%M"),
+            'pings': no_of_pings,
+            'tel': tel,
+            'operator': operator,
+            'trackable': 'Y' if bool(no_of_pings > trackable_threshold) else 'N',
+            'trip_days': trip_days if bool(no_of_pings > trackable_threshold) else 0
+        })
         if has_client_client:
-            result[cnt].insert(1, client_client)
+            result[cnt]['client_client'] = client_client
         cnt += 1
-        if (cnt % (n // 13)) == 0:
+        percentage = n // 13 if n > 13 else n
+        if (cnt % percentage) == 0:
             print('Progress = {0:.2f} %'.format(round((cnt / n) * 100, 2)))
-
-    if has_client_client:
-        SOURCE_INDEX += 1
-        DEST_INDEX += 1
-        PING_INDEX += 1
-        OPER_INDEX += 1
-        TRACKED_INDEX += 1
-        TRIP_DAYS += 1
-    if has_client_client:
-        datas = set(data[CLIENT_CLIENT_INDEX] for data in result)
-    else:
-        datas = set(data[SOURCE_INDEX] for data in result)
+    print('Progress = 100 %')
+    print('Started writing to the file ' + file_name)
     create_summary(result)
     add_new_sheet(result, 'All Trips')
-    for src in datas:
-        data = list(
-            trips for trips in result if trips[CLIENT_CLIENT_INDEX if has_client_client else SOURCE_INDEX] == src)
+    for src in set(data['client_client' if has_client_client else 'source'] for data in result):
+        data = list(trips for trips in result if trips['client_client' if has_client_client else 'source'] == src)
         add_new_sheet(data, str(src))
     workbook.close()
 
@@ -274,25 +282,23 @@ if __name__ == '__main__':
     # TRIP , TRIPDAYS
     billing_type = bool(sys.argv[8] == 'TRIPDAYS')
     username = sys.argv[9]
-
+    if file_name is None or file_name == '':
+        file_name = 'data'
     client = ''
     if len(sys.argv) > 10:
         client = sys.argv[10]
-    if file_name is None or file_name == '':
-        file_name = 'data'
-    CLIENT_CLIENT_INDEX = 1
-    SOURCE_INDEX = 3
-    DEST_INDEX = 4
-    PING_INDEX = 7
-    OPER_INDEX = 9
-    TRACKED_INDEX = 10
-    TRIP_DAYS = 11
-
-    workbook = xlsxwriter.Workbook(file_name + '.xlsx')
+        file_name = '{0}-{1}-{2}_{3}-{4}-{5}_{6}'.format(start_time[0], start_time[1], start_time[2], end_time[0],
+                                                         end_time[1], end_time[2], client)
+    else:
+        file_name = '{0}-{1}-{2}_{3}-{4}-{5}_{6}'.format(start_time[0], start_time[1], start_time[2], end_time[0],
+                                                         end_time[1], end_time[2], file_name)
+    workbook = xlsxwriter.Workbook('temp/' + file_name + '.xlsx')
     BOLD = workbook.add_format({'bold': True})
     HEADING_FORMAT = workbook.add_format({'bold': True, 'font_color': 'white', 'bg_color': '#457DC0'})
     TOTAL_FORMAT = workbook.add_format({'bold': True, 'font_color': 'white', 'bg_color': '#00B050'})
     config_file = json.load(open('config.json', 'r'))
     trackable_operators = config_file['operators']
     trackable_threshold = config_file['trackable_threshold']
+    headings_dict = config_file['headings']
     main()
+    exit(0)
