@@ -1,3 +1,7 @@
+python-dateutil
 pymongo
 dnspython
 xlsxwriter
+flask
+zappa
+intuginehelper

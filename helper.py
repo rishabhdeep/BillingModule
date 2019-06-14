@@ -1,5 +1,8 @@
-from pymongo import MongoClient
+from intuginehelper import intudb
 import datetime
+import re
+
+gmt_to_ist = datetime.timedelta(hours=5, minutes=30)
 
 
 def date_range(start_date, end_date):
@@ -7,40 +10,33 @@ def date_range(start_date, end_date):
         yield start_date + datetime.timedelta(date)
 
 
-def get_database():
-    server, port = open('private', 'r').read().rsplit(':', 1)
-    client = MongoClient(server, port=int(port))
-    database = client['telenitytracking']
-    return database
-
-
 def get_trips(user, client, startTime, endTime):
-    database = get_database()
+    database = intudb.get_database()
     collection = database['trips']
-    start = datetime.datetime(startTime[2], startTime[1], startTime[0])
-    end = datetime.datetime(endTime[2], endTime[1], endTime[0])
+    start = datetime.datetime(startTime[2], startTime[1], startTime[0]) - gmt_to_ist
+    end = datetime.datetime(endTime[2], endTime[1], endTime[0]) - gmt_to_ist
+
     query = {
-        'user': user, '$and': [{
+        'user': user,
+        'invoice': {'$nin': [re.compile("test", re.IGNORECASE)]},
+        'truck_number': {'$nin': [re.compile("test", re.IGNORECASE)]},
+        'vehicle': {'$nin': [re.compile("test", re.IGNORECASE)]},
+        '$and': [{
             '$or': [{
-                'startTime': {
-                    '$gte': start
-                }
+                'startTime': {'$lte': end}
             }, {
-                'startTime': {
-                    '$gte': start.isoformat()
-                }
+                'startTime': {'$lte': end.isoformat()}
             }]
         }, {
             '$or': [{
-                'startTime': {
-                    '$lte': end
-                }
+                'endTime': {'$gte': start}
             }, {
-                'startTime': {
-                    '$lte': end.isoformat()
-                }
+                'endTime': {'$gte': start.isoformat()}
+            }, {
+                'running': True
             }]
-        }]}
+        }
+        ]}
     if client == '' or client is None:
         data = collection.find(query)
         return list(x for x in data)
@@ -50,9 +46,7 @@ def get_trips(user, client, startTime, endTime):
         if isinstance(data, list):
             return data
         else:
-            data = list(d for d in data)
-            if isinstance(data, list):
-                return data
-            else:
-                data = list(d for d in data)
-                return data
+            res = list()
+            for x in data:
+                res.append(x)
+            return res
